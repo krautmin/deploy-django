@@ -63,8 +63,8 @@ Basically just clone the repo and fill in this list of GitHub Actions Secrets (i
 In the end this will deploy a Django project with 1 or more Django instances connected to a managed PostgreSQL database cluster with a seperate instance for a Redis Cache which is also used as a Broker for the dedicated Celery instance.
 
 Works in 4 stages:
-1. Tests the Django project in a GitHub Actions by running a test suite (Django's internal testing tools atm)
-2. Collect all static files and copy them to the S3 Object Storage/Linode Bucket
-3. Create a Docker Container from the GitHub Repo and push it to Docker Hub
-4. Provision the infrastructure with Terraform and configure it with Ansible
+1. Tests the Django project in a GitHub Actions instance by running a test suite (Django's internal testing tools atm)
+2. Collects all static files and copies them to the S3 Object Storage/Linode Bucket
+3. Creates a Docker Container from the GitHub Repo and pushes it to Docker Hub
+4. Provisions the infrastructure on Linode with Terraform and configures it with Ansible
 
