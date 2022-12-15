@@ -1,0 +1,34 @@
+- name: Waiting to connect to remote
+  wait_for_connection:
+    sleep: 10
+    timeout: 600
+
+- name: Ensure destination config dir exists
+  file:
+    path: /var/www/app/
+    state: directory
+
+- name: Copy .env file
+  ansible.builtin.copy:
+    src: "{{ playbook_dir | dirname | dirname }}/.env.prod"
+    dest: /var/www/app/.env
+
+- name: Add Docker Compose
+  template:
+    src: ./templates/docker-compose.yaml.jinja2
+    dest: /var/www/app/docker-compose.prod.yaml
+
+- name: Allow Outgoing Traffic
+  shell: "ufw default allow outgoing"
+
+- name: Deny Incoming Traffic
+  shell: "ufw default deny incoming"
+
+- name: Allow SSH Connections
+  shell: "ufw allow ssh"
+
+- name: Accept Connections to Redis Cache for private IPs
+  shell: "ufw allow from 192.168.0.0/24 to any port 6379"
+
+- name: Enable Firewall
+  shell: "ufw --force enable"

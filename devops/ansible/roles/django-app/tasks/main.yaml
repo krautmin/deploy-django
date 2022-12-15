@@ -1,0 +1,52 @@
+- name: Waiting to connect to remote
+  wait_for_connection:
+    sleep: 10
+    timeout: 600
+
+- name: Ensure destination config dir exists
+  file:
+    path: /var/www/app/
+    state: directory
+
+- name: Copy .env file
+  ansible.builtin.copy:
+    src: "{{ playbook_dir | dirname | dirname }}/.env.prod"
+    dest: /var/www/app/.env
+
+- name: Private Node IP to Env File
+  shell: "echo 'WEBAPP_NODE_PRIVATE='$(hostname --all-ip-addresses | awk '{print $2}') >> /var/www/app/.env" 
+
+- name: Load Balancer Host to Env File
+  shell: "echo \"\n\nLOAD_BALANCER_HOST={{ groups['nodebalancerhost'][0] }}\" >> /var/www/app/.env" 
+  when: "groups['nodebalancerhost']|length == 1"
+
+- name: Load Balancer IP to Env File
+  shell: "echo \"\n\nLOAD_BALANCER_IP={{ groups['nodebalancer'][0] }}\" >> /var/www/app/.env" 
+  when: "groups['nodebalancer']|length == 1"
+
+- name: Redis Host to Env File
+  shell: "echo \"\n\nREDIS_HOST={{ groups['redispriv'][0] }}\" >> /var/www/app/.env" 
+  when: "groups['redispriv']|length == 1"
+
+- name: Add Docker Compose
+  template:
+    src: ./templates/docker-compose.yaml.jinja2
+    dest: /var/www/app/docker-compose.prod.yaml
+
+- name: Allow Outgoing Traffic
+  shell: "ufw default allow outgoing"
+
+- name: Deny Incoming Traffic
+  shell: "ufw default deny incoming"
+
+- name: Allow SSH Connections
+  shell: "ufw allow ssh"
+
+- name: Allow Connections to Redis Cache
+  shell: "ufw allow from {{ groups['redispriv'][0] }} to any port 6379"
+
+- name: Allow Inbound Traffic on Port 80 for NodeBalancer IP Range
+  shell: "ufw allow in from 192.168.255.0/24 to any port 80"
+
+- name: Enable Firewall
+  shell: "ufw --force enable"

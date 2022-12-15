@@ -1,0 +1,69 @@
+---
+- hosts: webapps
+  become: yes
+  roles:
+    - docker-install
+    - django-app
+    - netdata-monitoring
+  vars_files:
+    - vars/main.yaml
+  tasks:
+    - name: Login to DockerHub
+      docker_login:
+        username: "{{ docker_username }}"
+        password: "{{ docker_token }}" 
+    - name: Run Django app in the Background
+      shell: echo "Running Docker Compose for Django App"
+      notify: docker-compose start django app
+    - name: Reclaim the Django node with `-id=`
+      shell: netdata-claim.sh -token={{ claim_token }} -rooms={{ claim_room_django }} -url={{ claim_url }} -id=$(uuidgen)
+      when: uuidgen_result.stat.exists == true and reclaim == true
+    - name: Restart Netdata Service with new config
+      shell: echo "Restarting Netdata with new configuration file"
+      notify: restart netdata
+
+- hosts: redis
+  become: yes
+  roles:
+    - docker-install
+    - redis-cache
+    - netdata-monitoring
+  vars_files:
+    - vars/main.yaml
+  tasks:
+    - name: Login to DockerHub
+      docker_login:
+        username: "{{ docker_username }}"
+        password: "{{ docker_token }}" 
+    - name: Start Up Redis Docker Container
+      shell: echo "Running Docker Compose for Redis"
+      notify: docker-compose start redis
+    - name: Reclaim the Redis node with `-id=`
+      shell: netdata-claim.sh -token={{ claim_token }} -rooms={{ claim_room_redis }} -url={{ claim_url }} -id=$(uuidgen)
+      when: uuidgen_result.stat.exists == true and reclaim == true
+    - name: Restart Netdata Service with new config
+      shell: echo "Restarting Netdata with new configuration file"
+      notify: restart netdata
+
+- hosts: workers
+  become: yes
+  roles:
+    - docker-install
+    - celery-worker
+    - netdata-monitoring
+  vars_files:
+    - vars/main.yaml
+  tasks:
+    - name: Login to DockerHub
+      docker_login:
+        username: "{{ docker_username }}"
+        password: "{{ docker_token }}" 
+    - name: Run Django app in the Background
+      shell: echo "Running Docker Compose for Django App"
+      notify: docker-compose start celery worker
+    - name: Reclaim the Celery node with `-id=`
+      shell: netdata-claim.sh -token={{ claim_token }} -rooms={{ claim_room_workers }} -url={{ claim_url }} -id=$(uuidgen)
+      when: uuidgen_result.stat.exists == true and reclaim == true
+    - name: Restart Netdata Service with new config
+      shell: echo "Restarting Netdata with new configuration file"
+      notify: restart netdata

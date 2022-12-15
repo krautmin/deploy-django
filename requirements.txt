@@ -1,0 +1,11 @@
+boto3==1.24.*
+celery==5.2.*
+Django==3.2.*
+django-celery-beat==2.3.*
+django-celery-results==2.4.*
+django-redis==5.2.*
+django-storages==1.13.*
+gunicorn==20.1.*
+Pillow==9.2.*
+python-dotenv==0.21.*
+redis==4.3.*

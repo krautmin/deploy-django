@@ -1,0 +1,64 @@
+version: "3.9"
+services:
+  watchtower:
+    image: index.docker.io/containrrr/watchtower:latest
+    restart: always
+    container_name: ct_watchtower-{{ ansible_date_time.iso8601_basic }}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /root/.docker/config.json:/config.json
+    command: --interval 30
+    profiles:
+      - app
+      - worker
+  app:
+    image: index.docker.io/{{ docker_username }}/{{ docker_appname }}:latest
+    restart: always
+    env_file: ./.env
+    container_name: ct_django-{{ ansible_date_time.iso8601_basic }}
+    environment:
+      - PORT=8080
+    ports:
+      - "80:8080"
+      - "6379:6379"
+    expose:
+      - 80
+      - 6379
+    volumes:
+      - ./certs:/app/certs
+    profiles:
+      - app
+  redis:
+    image: redis
+    container_name: ct_redis-{{ ansible_date_time.iso8601_basic }}
+    restart: always
+    ports:
+      - "6379:6379"
+    expose: 
+      - 6379
+    volumes:
+      - redis_data:/data
+    entrypoint: redis-server --appendonly yes
+    profiles:
+      - redis
+  worker:
+      image: index.docker.io/{{ docker_username }}/{{ docker_appname }}:latest
+      restart: always
+      env_file: ./.env
+      container_name: ct_celery-{{ ansible_date_time.iso8601_basic }}
+      environment:
+        - PORT=8080
+      ports:
+        - "80:8080"
+        - "6379:6379"
+      expose:
+        - 80
+        - 6379
+      volumes:
+        - ./certs:/app/certs
+      entrypoint: /opt/venv/bin/celery -A tcl_django worker -l info --beat
+      profiles:
+        - worker
+  
+volumes: 
+  redis_data:

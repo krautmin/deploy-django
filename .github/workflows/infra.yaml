@@ -1,0 +1,208 @@
+name: 4 - Apply Infrastructure via Terraform and Ansible
+
+on:
+  workflow_call:
+    secrets:
+      ALLOWED_HOST:
+        required: false
+      DJANGO_SECRET_KEY:
+        required: true
+      DJANGO_VM_COUNT:
+        required: true
+      DOCKERHUB_APP_NAME:
+         required: true
+      DOCKERHUB_TOKEN:
+        required: true
+      DOCKERHUB_USERNAME:
+        required: true
+      LINODE_BUCKET_REGION:
+        required: true
+      LINODE_BUCKET_ACCESS_KEY:
+        required: true
+      LINODE_BUCKET_SECRET_KEY:
+        required: true
+      LINODE_IMAGE:
+        required: true
+      LINODE_OBJECT_STORAGE_DEVOPS_BUCKET:
+        required: true
+      LINODE_OBJECT_STORAGE_DEVOPS_TF_KEY:
+        required: true
+      LINODE_OBJECT_STORAGE_DEVOPS_ACCESS_KEY:
+        required: true
+      LINODE_OBJECT_STORAGE_DEVOPS_SECRET_KEY:
+        required: true
+      LINODE_BUCKET:
+        required: true
+      LINODE_PA_TOKEN:
+        required: true
+      LINODE_DB_TYPE:
+        required: true
+      LINODE_INSTANCE_TYPE:
+        required: true
+      NETDATA_TOKEN:
+        required: true
+      NETDATA_ROOM_DJANGO:
+        required: true
+      NETDATA_ROOM_REDIS:
+        required: true
+      NETDATA_ROOM_WORKERS:
+        required: true
+      POSTGRES_DATABASE:
+        required: true
+      POSTGRES_DB_PORT:
+        required: true
+      POSTGRES_USER:
+        required: true
+      REDIS_PORT:
+        required: true
+      ROOT_USER_PW: 
+        required: true
+      SSH_DEVOPS_KEY_PUBLIC:
+        required: true
+      SSH_DEVOPS_KEY_PRIVATE:
+        required: true
+      SSL_CERT:
+        required: true
+      SSL_KEY:
+        required: true
+  workflow_dispatch:
+
+jobs:
+   terraform_ansible:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v1
+        with:
+          terraform_version: 1.3
+      - name: Add Terraform Backend for S3
+        run: |
+          cat << EOF > devops/tf/backend
+          skip_credentials_validation = true
+          skip_region_validation = true
+          bucket="${{ secrets.LINODE_OBJECT_STORAGE_DEVOPS_BUCKET }}"
+          key="${{ secrets.LINODE_OBJECT_STORAGE_DEVOPS_TF_KEY }}"
+          region="eu-central-1"
+          endpoint="eu-central-1.linodeobjects.com"
+          access_key="${{ secrets.LINODE_OBJECT_STORAGE_DEVOPS_ACCESS_KEY }}"
+          secret_key="${{ secrets.LINODE_OBJECT_STORAGE_DEVOPS_SECRET_KEY }}"
+          EOF
+      - name: Add Terraform TFVars
+        run: |
+          cat << EOF > devops/tf/terraform.tfvars
+          linode_pa_token="${{ secrets.LINODE_PA_TOKEN }}"
+          authorized_key="${{ secrets.SSH_DEVOPS_KEY_PUBLIC }}"
+          root_user_pw="${{ secrets.ROOT_USER_PW }}"
+          app_instance_vm_count="${{ secrets.DJANGO_VM_COUNT }}"
+          app_extra_nodes="0"
+          linode_image="${{ secrets.LINODE_IMAGE }}"
+          ssl_certificate="fullchain.pem"
+          ssl_key="privkey.pem"
+          db_type="${{ secrets.LINODE_DB_TYPE }}"
+          linode_type="${{ secrets.LINODE_INSTANCE_TYPE }}"
+          EOF
+      - name: Add SSL Cert to file
+        run: |
+          cat << EOF > devops/tf/fullchain.pem
+          ${{ secrets.SSL_CERT }}
+          EOF
+      - name: Add SSL Key to file
+        run: |
+          cat << EOF > devops/tf/privkey.pem
+          ${{ secrets.SSL_KEY }}
+          EOF
+      - name: Terraform Init
+        run: terraform -chdir=./devops/tf init -backend-config=backend
+      - name: Terraform Validate 
+        run: terraform -chdir=./devops/tf validate -no-color
+      - name: Terraform Apply Changes 
+        run: terraform -chdir=./devops/tf apply -auto-approve
+      - name: Get Postgres/Redis Credentials into GitHub env
+        run: |
+          echo "POSTGRES_HOST=$(terraform -chdir=./devops/tf output postgreshost | grep .net | grep -v "::" | sed -e 's/"//g')" >> $GITHUB_ENV
+          echo "POSTGRES_PRIVATE_HOST=$(terraform -chdir=./devops/tf output postgrespriv | grep .net | grep -v "::" | sed -e 's/"//g')" >> $GITHUB_ENV
+          echo "POSTGRES_PASSWORD=$(<./devops/tf/.pgpass)" >> $GITHUB_ENV
+      - name: Add PSQL Client to configure DB
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+      - name: Configure Linode Managed PSQL Database Cluster
+        run: |
+          sudo su postgres
+          cat << EOF > file.sql
+          ALTER ROLE ${{ secrets.POSTGRES_USER }} SET client_encoding TO 'utf8';
+          ALTER ROLE ${{ secrets.POSTGRES_USER }} SET default_transaction_isolation TO 'read committed'; 
+          ALTER ROLE ${{ secrets.POSTGRES_USER }} SET timezone TO 'Europe/Berlin';
+          DROP DATABASE IF EXISTS ${{ secrets.POSTGRES_DATABASE }};
+          CREATE DATABASE ${{ secrets.POSTGRES_DATABASE }} OWNER ${{ secrets.POSTGRES_USER }} LOCALE 'de_DE.utf8' TEMPLATE template0;
+          ALTER DATABASE ${{ secrets.POSTGRES_DATABASE }} SET timezone TO 'Europe/Berlin';
+          EOF
+          psql -a -q -f file.sql "host=${{ env.POSTGRES_HOST }} port=${{ secrets.POSTGRES_DB_PORT }} dbname=postgres user=${{ secrets.POSTGRES_USER }} password=${{ env.POSTGRES_PASSWORD }}"
+      - name: Add SSH Keys
+        run: |
+          cat << EOF > devops/ansible/devops-key
+          ${{ secrets.SSH_DEVOPS_KEY_PRIVATE }}
+          EOF
+      - name: Update devops private key permissions
+        run: |
+          chmod 400 devops/ansible/devops-key
+      - name: Install Ansible
+        run: |
+          pip install ansible
+      - name: Add Production Environment Variables to Instance
+        run: |
+          cat << EOF > .env.prod
+          ALLOWED_HOST=${{ secrets.ALLOWED_HOST }}
+          # required keys
+          DJANGO_SECRET_KEY=${{ secrets.DJANGO_SECRET_KEY }}
+          DATABASE_BACKEND=postgresql
+          DJANGO_DEBUG="0"
+          DJANGO_STORAGE_SERVICE=linode
+          # postgres db setup
+          POSTGRES_DB=${{ secrets.POSTGRES_DATABASE }}
+          POSTGRES_USER=${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD=${{ env.POSTGRES_PASSWORD }}
+          POSTGRES_TCP_PORT=${{ secrets.POSTGRES_DB_PORT }}
+          POSTGRES_HOST=${{ env.POSTGRES_PRIVATE_HOST }}
+          # static files connection
+          LINODE_BUCKET=${{ secrets.LINODE_BUCKET }}
+          LINODE_BUCKET_REGION=${{ secrets.LINODE_BUCKET_REGION }}
+          LINODE_BUCKET_ACCESS_KEY=${{ secrets.LINODE_BUCKET_ACCESS_KEY }}
+          LINODE_BUCKET_SECRET_KEY=${{ secrets.LINODE_BUCKET_SECRET_KEY }}
+          # Redis
+          REDIS_PORT=${{ secrets.REDIS_PORT }}
+          EOF
+      - name: Adding or Override Ansible Config File
+        run: |
+          cat << EOF > devops/ansible/ansible.cfg
+          [defaults]
+          ansible_python_interpreter='/usr/bin/python3'
+          deprecation_warnings=False
+          inventory=./inventory.ini
+          remote_user="root"
+          host_key_checking=False
+          private_key_file = ./devops-key
+          retries=2
+          EOF
+      - name: Adding Ansible Variables
+        run: |
+          mkdir -p devops/ansible/vars/
+          cat << EOF > devops/ansible/vars/main.yaml
+          ---
+          docker_appname: "${{ secrets.DOCKERHUB_APP_NAME }}"
+          docker_token: "${{ secrets.DOCKERHUB_TOKEN }}"
+          docker_username: "${{ secrets.DOCKERHUB_USERNAME }}"
+          claim_token: "${{ secrets.NETDATA_TOKEN }}"
+          claim_room_django: "${{ secrets.NETDATA_ROOM_DJANGO }}"
+          claim_room_redis: "${{ secrets.NETDATA_ROOM_REDIS }}"
+          claim_room_workers: "${{ secrets.NETDATA_ROOM_WORKERS }}"
+          claim_url: https://app.netdata.cloud
+          reclaim: true
+          dbengine_multihost_disk_space: 2048
+          web_mode: none
+          EOF
+      - name: Run main playbook
+        run: |
+          ANSIBLE_CONFIG=devops/ansible/ansible.cfg ansible-playbook devops/ansible/main.yaml
