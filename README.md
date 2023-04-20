@@ -29,7 +29,7 @@ Based on the awesome eBook ["Understanding Databases"](https://www.linode.com/de
 + At the moment the SQL code that configures the PostgreSQL database also wipes it everytime it is executed
 + When it becomes available on Linode i will switch to a managed Redis Cache
 
-Works in 4 stages:
+## Works in 4 stages:
 1. Tests the Django project in a GitHub Actions instance by running a test suite (Django's internal testing tools atm)
 2. Collects all static files and copies them to the S3 Object Storage/Linode Bucket
 3. Creates a Docker Container from the GitHub Repo and pushes it to Docker Hub
